@@ -1,12 +1,15 @@
 import rclpy
 from rclpy.node import Node
+import time
+
 from px4_msgs.msg import MissionResult, VehicleCommand
+from geometry_msgs.msg import Point  # ⭐️ YOLO 데이터를 받기 위해 추가
 
 class MissionControlNode(Node):
     def __init__(self):
         super().__init__('mission_control_node')
         
-        # 1. PX4의 미션 진행 상태 수신 (몇 번 WP에 도달했는지)
+        # 1. 미션 진행 상태 수신
         self.mission_sub = self.create_subscription(
             MissionResult, 
             '/fmu/out/mission_result', 
@@ -14,42 +17,49 @@ class MissionControlNode(Node):
             10
         )
         
-        # 모드 변경 명령 퍼블리셔
+        # 2. 사령관도 복귀 타이밍을 재기 위해 YOLO 데이터를 듣습니다.
+        self.yolo_sub = self.create_subscription(
+            Point, 
+            '/yolo/target_position', 
+            self.yolo_callback, 
+            10
+        )
+        
+        # 명령 퍼블리셔
         self.command_pub = self.create_publisher(VehicleCommand, '/fmu/in/vehicle_command', 10)
         
-        # 초기 모드 (이륙 및 미션 시작은 QGC나 수동으로 했다고 가정)
-        self.current_mode = "MISSION" 
+        # 3. 상태 감시용 타이머 (1초에 10번씩 상태를 체크합니다)
+        self.timer = self.create_timer(0.1, self.check_status_loop)
         
-        self.get_logger().info("🚀 MissionResult 기반 제어 노드 시작됨.")
+        # 변수 초기화
+        self.current_mode = "MISSION" # 초기값을 MISSION으로 변경
+        self.last_yolo_time = time.time()
+        
+        self.get_logger().info("Mode 노드 시작됨. WP2 도달 대기 중...")
+
+    def yolo_callback(self, msg):
+        """ YOLO 데이터가 들어올 때마다 시간 갱신 """
+        self.last_yolo_time = time.time()
 
     def mission_callback(self, msg):
-        # msg.seq_reached: 가장 최근에 도달한 Waypoint의 번호 (QGC 기준)
-        # 참고: 이륙(Takeoff)이 0번이거나 1번일 수 있으므로, 
-        # 실제 QGC 미션 리스트의 번호를 확인하고 숫자를 맞추셔야 합니다.
+        """ WP 진입 확인 후 OFFBOARD 탈취 """
         reached_wp = msg.seq_reached
         
-        # -----------------------------------------------------
-        # 시나리오: WP2 도달 시 -> OFFBOARD 모드 탈취
-        # -----------------------------------------------------
         if self.current_mode == "MISSION" and reached_wp == 2:
-            self.get_logger().info(f"🎯 작전 구역(WP2) 도달 확인! -> OFFBOARD 모드로 전환합니다.")
-            
-            # ⚠️ 여기서 OFFBOARD로 넘어가기 전, 타겟 추적 명령(Setpoint)을 먼저 쏴야 합니다!
+            self.get_logger().info(f"WP2 도달 -> Guidance에게 제어권을 넘깁니다 (OFFBOARD).")
             self.set_mode(6.0) # OFFBOARD
             self.current_mode = "OFFBOARD"
 
-        # -----------------------------------------------------
-        # 시나리오: OFFBOARD 종료 및 미션 복귀
-        # (미션이 정지되었으므로 seq_reached 대신 다른 조건 필요)
-        # -----------------------------------------------------
-        elif self.current_mode == "OFFBOARD":
-            # 예시: YOLO 타겟을 폭하했거나, 추적이 끝났다는 변수(is_target_cleared)가 True일 때
-            is_target_cleared = False # 실제로는 YOLO 처리 로직에서 받아와야 합니다.
+    def check_status_loop(self):
+        """ 주기적으로 상태를 검사하여 복귀(Return) 여부를 결정 """
+        # 오프보드 모드인데, YOLO 데이터를 못 받은 지 3초가 넘었다면?
+        if self.current_mode == "OFFBOARD":
+            time_since_last_target = time.time() - self.last_yolo_time
             
-            if is_target_cleared:
-                self.get_logger().info(f"🏁 임무 완료! -> 원래 경로(MISSION)로 복귀합니다.")
+            if time_since_last_target > 3.0:
+                self.get_logger().info(f"타겟 상실 3초 경과 작전 종료 -> MISSION으로 복귀시킵니다.")
                 self.set_mode(4.0) # AUTO.MISSION
-                self.current_mode = "MISSION_RETURN"
+                self.current_mode = "MISSION_RETURN" # 중복 명령 방지
 
     def set_mode(self, mode_param):
         """ 모드 변경 명령 전송 """

@@ -28,6 +28,7 @@ setup(
             'visualize_node = vtail_control.visualize_node:main',
             'target_marker_node = vtail_control.target_marker_node:main',
             'mode_node = vtail_control.mode_node:main',
+            'yolo_node = vtail.control.yolo_node:main',
         ],
     },
 )

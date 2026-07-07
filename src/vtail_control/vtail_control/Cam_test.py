@@ -2,6 +2,10 @@ import cv2
 import math
 from ultralytics import YOLO
 
+from geometry_msgs.msg import Point 
+
+
+
 # ==========================================
 # 추가된 함수: 점선 그리기
 # ==========================================
@@ -71,7 +75,7 @@ class ShapeAndSizeFilter:
 # 1. 모델 로드 및 필터 초기화 (라즈베리파이 환경)
 # ==========================================
 # 📌 라즈베리파이 내부의 실제 모델 경로로 수정해주세요 (예시 경로로 작성됨)
-model = YOLO("/home/pi/yolo_result/weights/best.pt")
+model = YOLO("Competition_ws/src/vtail_control/vtail_control/best.pt")
 tracker_filter = ShapeAndSizeFilter(max_lost_frames=5)
 
 # 📌 라즈베리파이 카메라 안정성을 위해 V4L2 백엔드 사용
