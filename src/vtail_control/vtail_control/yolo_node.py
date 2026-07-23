@@ -4,6 +4,7 @@ from geometry_msgs.msg import Point
 
 import cv2
 import math
+import os
 from ultralytics import YOLO
 
 # ==========================================
@@ -63,26 +64,45 @@ class YoloNode(Node):
         # 1. 조종사(Guidance Node)에게 보낼 퍼블리셔 생성
         self.target_pub = self.create_publisher(Point, '/yolo/target_position', 10)
         
-        # 2. YOLO 및 카메라 세팅
-        self.model = YOLO("Competition_ws/src/vtail_control/vtail_control/best.pt")
+        # 2. YOLO 가중치 파일 안전 경로 탐색 (상대 경로 오류 방지)
+        curr_dir = os.path.dirname(os.path.abspath(__file__))
+        model_path = os.path.join(curr_dir, "best.pt")
+        if not os.path.exists(model_path):
+            model_path = "/home/nahj183/Competition_ws/src/vtail_control/vtail_control/best.pt"
+            
+        self.get_logger().info(f"YOLO 모델 불러오는 중: {model_path}")
+        self.model = YOLO(model_path)
         self.tracker_filter = ShapeAndSizeFilter(max_lost_frames=5)
         
+        # 3. 카메라 비디오 캡처 설정
         self.cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        
         if not self.cap.isOpened():
-            self.get_logger().error("웹캠을 열 수 없습니다")
-            return
+            self.cap = cv2.VideoCapture(0)
             
-        self.get_logger().info("YOLO 노드 가동 시작, 타겟 탐색 중...")
+        if not self.cap.isOpened():
+            self.get_logger().warn("⚠️ 카메라(/dev/video0)를 열 수 없습니다. 카메라 입력 대기 중...")
+            self.camera_ready = False
+        else:
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.camera_ready = True
+            self.get_logger().info("📷 YOLO 노드 가동 시작, 카메라 연결 성공!")
 
-        # 3. while 루프 대신 ROS 타이머 사용 (약 30Hz로 카메라 프레임 읽기)
+        # 4. 약 30Hz로 프레임 처리
         self.timer = self.create_timer(0.033, self.process_frame)
 
     def process_frame(self):
+        if not hasattr(self, 'camera_ready') or not self.camera_ready:
+            # 카메라 재시도
+            self.cap = cv2.VideoCapture(0)
+            if self.cap.isOpened():
+                self.camera_ready = True
+                self.get_logger().info("📷 카메라 연결 성공!")
+            else:
+                return
+
         ret, frame = self.cap.read()
-        if not ret: return
+        if not ret or frame is None: return
 
         # 흑백화 후 BGR 재변환
         frame = cv2.cvtColor(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
@@ -125,29 +145,27 @@ class YoloNode(Node):
                 draw_dashed_line(frame, (cam_cx, cam_cy), (cx, cy), (255, 200, 0), 2, dash_length=15)
                 cv2.putText(frame, f"({offset_x}, {offset_y})", (cx + 10, cy + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-                # ==========================================
-                # 조종사(Guidance Node)에게 좌표 쏘기!
-                # ==========================================
+                # 조종사(Guidance Node)에게 좌표 전송
                 msg = Point()
-                # Guidance 노드의 변수 매칭:
-                # msg.x -> self.target_z_dist (전방 거리: 임시로 y축 오차 사용)
-                # msg.y -> self.target_y_rel (좌우 오차: x축 오차 사용)
                 msg.x = float(offset_y)  
                 msg.y = float(offset_x)  
                 msg.z = 0.0
                 
                 self.target_pub.publish(msg)
 
-        cv2.imshow('YOLO Target Tracker', frame)
-        cv2.waitKey(1)
+        try:
+            cv2.imshow('YOLO Target Tracker', frame)
+            cv2.waitKey(1)
+        except Exception:
+            pass
 
 def main(args=None):
     rclpy.init(args=args)
     node = YoloNode()
     rclpy.spin(node)
     
-    # 노드 종료 시 카메라 자원 해제
-    node.cap.release()
+    if hasattr(node, 'cap') and node.cap:
+        node.cap.release()
     cv2.destroyAllWindows()
     node.destroy_node()
     rclpy.shutdown()

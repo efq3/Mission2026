@@ -4,14 +4,15 @@ import time
 
 from px4_msgs.msg import OffboardControlMode, VehicleRatesSetpoint
 from geometry_msgs.msg import Point 
+from rclpy.qos import qos_profile_sensor_data
 
 class GuidanceNode(Node):
     def __init__(self):
         super().__init__('vtail_guidance_node')
 
-        # 1. 제어 명령 발행 (Publish)
-        self.offboard_pub = self.create_publisher(OffboardControlMode, '/fmu/in/offboard_control_mode', 10)
-        self.rates_pub = self.create_publisher(VehicleRatesSetpoint, '/fmu/in/vehicle_rates_setpoint', 10)
+        # 1. 제어 명령 발행 (Publish) - PX4 통신 연결용 QoS 적용
+        self.offboard_pub = self.create_publisher(OffboardControlMode, '/fmu/in/offboard_control_mode', qos_profile_sensor_data)
+        self.rates_pub = self.create_publisher(VehicleRatesSetpoint, '/fmu/in/vehicle_rates_setpoint', qos_profile_sensor_data)
 
         # 2. 데이터 수신 (Subscribe)
         self.target_sub = self.create_subscription(Point, '/yolo/target_position', self.target_callback, 10)
@@ -24,7 +25,7 @@ class GuidanceNode(Node):
         self.target_z_dist = 0.0 
         self.last_rx_time = time.time()
         
-        # 비행 파라미터 
+        # 비행 파라미터 (고정익 수치 원본 유지)
         self.v_cruise = 17.0     
         self.v_y = 0.0           
         
@@ -51,7 +52,7 @@ class GuidanceNode(Node):
         time_since_last_target = current_time - self.last_rx_time
 
         # ---------------------------------------------------------
-        # [유도 제어 계산 파트]
+        # [유도 제어 계산 파트] (고정익 제어 로직 100% 원본 유지)
         # ---------------------------------------------------------
         if time_since_last_target > 1.0:
             # 타겟 데이터를 1초 이상 못 받은 경우: 직진 유지
@@ -82,7 +83,7 @@ class GuidanceNode(Node):
     def publish_vehicle_rates(self, yaw_rate):
         msg = VehicleRatesSetpoint()
         msg.roll = yaw_rate * 0.5
-        msg.pitch = 1.0
+        msg.pitch = 0.0  # 수평 유지를 위해 0.0 rad/s로 설정 (1.0 rad/s 설정 시 뱅글뱅글 돎)
         msg.yaw = yaw_rate
         msg.thrust_body = [0.5, 0.0, 0.0]  
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)

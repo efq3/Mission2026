@@ -1,3 +1,5 @@
+import os
+from glob import glob
 from setuptools import find_packages, setup
 
 package_name = 'vtail_control'
@@ -10,6 +12,8 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        (os.path.join('share', package_name, 'launch'), glob('launch/*.py')),
+        (os.path.join('share', package_name, 'worlds'), glob('worlds/*.world')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -28,7 +32,7 @@ setup(
             'visualize_node = vtail_control.visualize_node:main',
             'target_marker_node = vtail_control.target_marker_node:main',
             'mode_node = vtail_control.mode_node:main',
-            'yolo_node = vtail.control.yolo_node:main',
+            'yolo_node = vtail_control.yolo_node:main',
         ],
     },
 )
