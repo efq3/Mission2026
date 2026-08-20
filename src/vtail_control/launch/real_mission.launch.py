@@ -26,5 +26,11 @@ def generate_launch_description():
             executable='qgc_streamer_node',
             name='qgc_streamer_node',
             output='screen'
+        ),
+        Node(
+            package='vtail_control',
+            executable='Coral_PnP_xyz',
+            name='Coral_PnP_xyz',
+            output='screen'
         )
     ])
